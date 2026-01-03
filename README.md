@@ -1,83 +1,163 @@
 # Hindawi Audiobook CLI
 
-A command-line tool to convert public domain Arabic books from [Hindawi.org](https://www.hindawi.org) into high-quality M4B audiobooks. It uses Neural TTS (Facebook MMS-TTS) for natural Arabic speech and proper chapter support.
+Convert public-domain Arabic books from Hindawi.org into fully chaptered M4B audiobooks with optional PDF appendices.
 
 ## Features
 
--   **Scrapes Hindawi Books**: Fetches text, metadata (title, author), and cover art automatically.
--   **Neural TTS**: Uses `facebook/mms-tts-ara` for natural Arabic narration (VITS model).
--   **Full Audiobook Format**: Produces a single `.m4b` file with:
-    -   Chapter markers (mapped to book TOC).
-    -   Embedded cover art.
-    -   Correct metadata.
--   **Resume Capability**: Caches generated audio chapters to allow resuming if interrupted.
--   **Dockerized**: Easy to run without dependency hell.
+- 📚 **Scrape** book content from Hindawi.org
+- 🎙️ **Multiple TTS Options**: 
+  - Offline: HuggingFace MMS (facebook/mms-tts-ara)
+  - Online: Microsoft Edge TTS with multiple Arabic voices
+- 🎧 **M4B Audiobooks** with chapters, metadata, and cover art
+- 📄 **PDF Appendices** containing images, captions, and footnotes
+- 🐳 **Docker Support** for easy deployment
+- 🎨 **Rich CLI** with progress bars and detailed logging
 
-## Prerequisites
+## Installation
 
--   Docker
--   Internet connection (for initial model download and scraping)
-
-## Quick Start
-
-### 1. Build the Docker Image
+### Local Installation
 
 ```bash
+# Clone the repository
+git clone <repository-url>
+cd hindawi
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Docker Installation
+
+```bash
+# Build the Docker image
 docker build -t hindawi_audiobook .
 ```
 
-### 2. Run the Tool
+## Usage
 
-Use the book ID from the Hindawi URL (e.g., for `https://www.hindawi.org/books/46319638/`, the ID is `46319638`).
-
-Create necessary directories for output and cache:
+### Local Usage (Interactive)
 
 ```bash
-mkdir -p output cache
+# Interactive mode - prompts for all options
+python -m src.main 46319638
 ```
 
-Run the container:
+### Local Usage (Non-Interactive)
 
 ```bash
+# Generate both audio and PDF
+python -m src.main 46319638 --mode both --tts-provider edge --voice ar-EG-SalmaNeural
+
+# Generate audio only with MMS
+python -m src.main 46319638 --mode audio --tts-provider mms
+
+# Generate PDF appendix only
+python -m src.main 46319638 --mode pdf
+```
+
+### Docker Usage
+
+```bash
+# PDF only (no TTS needed, works in Docker)
 docker run --rm \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/cache:/app/cache \
-  hindawi_audiobook <BOOK_ID>
-```
+  hindawi_audiobook 46319638 --mode pdf
 
-**Example:**
-
-```bash
+# Audio with Edge TTS (requires internet)
 docker run --rm \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/cache:/app/cache \
-  hindawi_audiobook 46319638
+  hindawi_audiobook 46319638 --mode audio --tts-provider edge --voice ar-EG-SalmaNeural
+
+# Both audio and PDF
+docker run --rm \
+  -v $(pwd)/output:/app/output \
+  -v $(pwd)/cache:/app/cache \
+  hindawi_audiobook 46319638 --mode both --tts-provider edge --voice ar-EG-SalmaNeural
 ```
 
-### 3. Check Output
+## Command-Line Options
 
-The requested book will be saved as an `.m4b` file in the `output/` directory.
+```
+positional arguments:
+  book_id               The ID of the book on Hindawi.org (e.g., 46319638)
 
-## Configuration
+optional arguments:
+  --output-dir DIR      Directory to save final outputs (default: output)
+  --cache-dir DIR       Directory for intermediate files (default: cache)
+  --mode {audio,pdf,both}
+                        Generation mode (default: interactive prompt)
+  --tts-provider {mms,edge}
+                        TTS provider (default: interactive prompt)
+  --voice VOICE         Voice for Edge TTS:
+                        - ar-EG-SalmaNeural (Egypt - Female)
+                        - ar-EG-ShakirNeural (Egypt - Male)
+                        - ar-SA-HamedNeural (Saudi Arabia - Male)
+                        - ar-SA-ZariyahNeural (Saudi Arabia - Female)
+```
 
--   **Cache**: The `cache/` directory stores downloaded intermediate WAV files and cover images. If the process is stopped, running it again will reuse these files.
--   **Performance**: TTS generation is CPU intensive. On a standard CPU, it may take 1-2x real-time to generate audio (i.e., a 5-hour book might take 5-10 hours).
+## Available Voices
 
-## Development
+### Egyptian Arabic
+- **Salma** (Female): `ar-EG-SalmaNeural`
+- **Shakir** (Male): `ar-EG-ShakirNeural`
 
-The source code is located in `src/`:
--   `src/main.py`: CLI entry point.
--   `src/scraper.py`: Hindawi scraping logic.
--   `src/tts_engine.py`: TTS model interface.
--   `src/audiobook_builder.py`: Audio assembly and M4B muxing.
+### Saudi Arabic
+- **Hamed** (Male): `ar-SA-HamedNeural`
+- **Zariyah** (Female): `ar-SA-ZariyahNeural`
 
-To run locally without Docker (requires ffmpeg, python 3.10+):
+## Output Files
 
+- **M4B Audiobook**: `output/<book_title>.m4b`
+- **PDF Appendix**: `output/<book_title>_Appendix.pdf`
+- **Cache Files**: `cache/<book_id>/` (WAV files, metadata, cover)
+
+## Examples
+
+### Example 1: Quick PDF Generation
 ```bash
-pip install -r requirements.txt
-python -m src.main <BOOK_ID>
+docker run --rm -v $(pwd)/output:/app/output -v $(pwd)/cache:/app/cache \
+  hindawi_audiobook 46319638 --mode pdf
 ```
+
+### Example 2: Full Audiobook with Egyptian Female Voice
+```bash
+python -m src.main 46319638 \
+  --mode both \
+  --tts-provider edge \
+  --voice ar-EG-SalmaNeural
+```
+
+### Example 3: Offline Audio Generation
+```bash
+python -m src.main 46319638 \
+  --mode audio \
+  --tts-provider mms
+```
+
+## Troubleshooting
+
+### Docker 403 Errors
+The Hindawi website may block requests from Docker containers. If you encounter 403 errors:
+1. Use `--mode pdf` which works reliably in Docker
+2. For audio generation, run locally instead of in Docker
+3. Consider using a proxy if Docker audio generation is required
+
+### Missing Dependencies
+If you encounter missing system dependencies, ensure you have:
+- `ffmpeg` for audio processing
+- `cairo`, `pango` for PDF generation
+- `nodejs` for cloudscraper
 
 ## License
 
-This tool is for educational purposes. Please ensure you comply with Hindawi's terms of service and copyright laws regarding the texts.
+This tool is for educational purposes. Respect Hindawi's terms of service and only use with public-domain content.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

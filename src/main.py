@@ -12,6 +12,12 @@ def main():
     parser.add_argument('book_id', help="The ID of the book on Hindawi.org (e.g., 46319638)")
     parser.add_argument('--output-dir', default='output', help="Directory to save the final M4B")
     parser.add_argument('--cache-dir', default='cache', help="Directory for intermediate files")
+    parser.add_argument('--mode', choices=['audio', 'pdf', 'both'], default=None, 
+                        help="Generation mode: audio, pdf, or both (interactive if not specified)")
+    parser.add_argument('--tts-provider', choices=['mms', 'edge'], default=None,
+                        help="TTS provider: mms or edge (interactive if not specified)")
+    parser.add_argument('--voice', default=None,
+                        help="Voice for Edge TTS: ar-EG-SalmaNeural, ar-EG-ShakirNeural, ar-SA-HamedNeural, ar-SA-ZariyahNeural")
     
     args = parser.parse_args()
     
@@ -48,44 +54,62 @@ def main():
         cover_path = None
 
     # 3. Mode Selection
-    from rich.prompt import Prompt
+    if args.mode:
+        # Non-interactive mode (from command-line args)
+        mode_map = {'audio': '1', 'pdf': '2', 'both': '3'}
+        mode = mode_map[args.mode]
+    else:
+        # Interactive mode
+        from rich.prompt import Prompt
+        
+        log_info("🛠️  Select Generation Mode:")
+        print("  1. Audio Only")
+        print("  2. Appendix (PDF) Only")
+        print("  3. Both (Audio + Appendix)")
+        
+        mode = Prompt.ask("Choose mode", choices=["1", "2", "3"], default="3")
     
-    log_info("🛠️  Select Generation Mode:")
-    print("  1. Audio Only")
-    print("  2. Appendix (PDF) Only")
-    print("  3. Both (Audio + Appendix)")
-    
-    mode = Prompt.ask("Choose mode", choices=["1", "2", "3"], default="3")
     generate_audio = mode in ["1", "3"]
     generate_pdf = mode in ["2", "3"]
 
     # 4. TTS Selection (Only if audio)
     if generate_audio:
-        log_info("🔊  Select TTS Provider:")
-        print("  1. HuggingFace MMS (Offline, Standard Quality)")
-        print("  2. Edge TTS (Online, High Quality, Multiple Voices)")
-        
-        choice = Prompt.ask("Choose provider", choices=["1", "2"], default="1")
-        
-        if choice == "1":
-            provider = "mms"
-            voice = "facebook/mms-tts-ara"
+        if args.tts_provider:
+            # Non-interactive mode
+            provider = args.tts_provider
+            if provider == "edge":
+                voice = args.voice or "ar-EG-SalmaNeural"  # Default to Salma
+            else:
+                voice = "facebook/mms-tts-ara"
         else:
-            provider = "edge"
-            log_info("🗣️  Select Voice:")
-            print("  1. Salma (Egypt - Female)")
-            print("  2. Shakir (Egypt - Male)")
-            print("  3. Hamed (Saudi Arabia - Male)")
-            print("  4. Zariyah (Saudi Arabia - Female)")
+            # Interactive mode
+            from rich.prompt import Prompt
             
-            voice_map = {
-                "1": "ar-EG-SalmaNeural",
-                "2": "ar-EG-ShakirNeural",
-                "3": "ar-SA-HamedNeural",
-                "4": "ar-SA-ZariyahNeural"
-            }
-            v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
-            voice = voice_map[v_choice]
+            log_info("🔊  Select TTS Provider:")
+            print("  1. HuggingFace MMS (Offline, Standard Quality)")
+            print("  2. Edge TTS (Online, High Quality, Multiple Voices)")
+            
+            choice = Prompt.ask("Choose provider", choices=["1", "2"], default="1")
+            
+            if choice == "1":
+                provider = "mms"
+                voice = "facebook/mms-tts-ara"
+            else:
+                provider = "edge"
+                log_info("🗣️  Select Voice:")
+                print("  1. Salma (Egypt - Female)")
+                print("  2. Shakir (Egypt - Male)")
+                print("  3. Hamed (Saudi Arabia - Male)")
+                print("  4. Zariyah (Saudi Arabia - Female)")
+                
+                voice_map = {
+                    "1": "ar-EG-SalmaNeural",
+                    "2": "ar-EG-ShakirNeural",
+                    "3": "ar-SA-HamedNeural",
+                    "4": "ar-SA-ZariyahNeural"
+                }
+                v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
+                voice = voice_map[v_choice]
 
         log_info(f"🤖  Initializing TTS Engine ({provider} - {voice})...")
         tts = TTSEngine(provider=provider, voice=voice)
