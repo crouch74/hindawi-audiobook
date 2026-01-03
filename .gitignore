@@ -72,3 +72,6 @@ output/
 cache/
 *.m4b
 *.wav
+
+# macOS
+.DS_Store
