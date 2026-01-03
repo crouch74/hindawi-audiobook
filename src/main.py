@@ -146,6 +146,7 @@ def main():
             progress.console.print(f"Fetching content for: {chapter['title']}")
             content_data = scraper.get_chapter_content(chapter['url'])
             text = content_data['text']
+            audio_url = content_data.get('audio_url')
             
             # Store appendix info
             appendices_data.append({
@@ -156,9 +157,36 @@ def main():
             # Check if audio exists
             if generate_audio:
                 if os.path.exists(wav_path):
-                    # Skip TTS
+                    # Audio already cached
                     pass
-                else:
+                elif audio_url:
+                    # Pre-recorded audio exists - download it instead of TTS
+                    log_info(f"  🎵 Downloading pre-recorded audio...")
+                    
+                    # Download to temporary location (might be MP3)
+                    temp_audio_path = wav_path.replace('.wav', '_temp.mp3')
+                    
+                    if scraper.download_audio(audio_url, temp_audio_path):
+                        # Convert to WAV if needed
+                        if temp_audio_path.endswith('.mp3'):
+                            try:
+                                from pydub import AudioSegment
+                                audio = AudioSegment.from_mp3(temp_audio_path)
+                                audio.export(wav_path, format='wav')
+                                os.remove(temp_audio_path)
+                                log_success(f"  ✓ Audio downloaded and converted")
+                            except Exception as e:
+                                log_error(f"  Error converting audio: {e}")
+                                # Keep the MP3 if conversion fails
+                                os.rename(temp_audio_path, wav_path.replace('.wav', '.mp3'))
+                        else:
+                            os.rename(temp_audio_path, wav_path)
+                    else:
+                        log_warning(f"  ⚠️  Failed to download audio, will use TTS instead")
+                        audio_url = None  # Fall back to TTS
+                
+                # If no pre-recorded audio, use TTS
+                if not audio_url and not os.path.exists(wav_path):
                     if not text:
                         log_warning(f"⚠️  Empty text for chapter: {chapter['title']}")
                         progress.advance(task_id)

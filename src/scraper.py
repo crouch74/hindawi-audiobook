@@ -137,16 +137,26 @@ class Scraper:
     def get_chapter_content(self, chapter_url):
         """
         Fetches chapter content, separating narrative text from appendix items (images, footnotes).
-        Returns dict: {'text': str, 'appendix': {'images': [], 'footnotes': []}}
+        Also detects if pre-recorded audio exists.
+        Returns dict: {'text': str, 'appendix': {'images': [], 'footnotes': []}, 'audio_url': str or None}
         """
         print(f"Fetching content from {chapter_url}")
         response = self.session.get(chapter_url)
         if response.status_code == 404:
             print(f"Warning: Chapter {chapter_url} not found.")
-            return {'text': "", 'appendix': {'images': [], 'footnotes': []}}
+            return {'text': "", 'appendix': {'images': [], 'footnotes': []}, 'audio_url': None}
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Check for pre-existing audio
+        audio_url = None
+        audio_tag = soup.find('audio', class_='audio-player')
+        if audio_tag and audio_tag.get('src'):
+            audio_url = audio_tag['src']
+            if not audio_url.startswith('http'):
+                audio_url = self.BASE_URL + audio_url if audio_url.startswith('/') else audio_url
+            print(f"  ✓ Found pre-recorded audio: {audio_url}")
         
         content_div = soup.find(class_='chapterContent') or soup.find('div', id='content') or soup.find('div', class_='content') or soup.body
         
@@ -251,8 +261,29 @@ class Scraper:
         
         return {
             'text': "\n\n".join(text_content),
-            'appendix': appendix
+            'appendix': appendix,
+            'audio_url': audio_url
         }
+
+    def download_audio(self, url, output_path):
+        """
+        Downloads pre-recorded audio file.
+        """
+        if not url:
+            return False
+            
+        print(f"  Downloading audio from {url}")
+        try:
+            response = self.session.get(url, stream=True)
+            response.raise_for_status()
+            
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return True
+        except Exception as e:
+            print(f"  Error downloading audio: {e}")
+            return False
 
     def download_cover(self, url, output_path):
         """

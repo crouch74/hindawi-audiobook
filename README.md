@@ -5,6 +5,7 @@ Convert public-domain Arabic books from Hindawi.org into fully chaptered M4B aud
 ## Features
 
 - 📚 **Scrape** book content from Hindawi.org
+- 🎵 **Smart Audio Detection**: Automatically downloads pre-recorded audio when available
 - 🎙️ **Multiple TTS Options**: 
   - Offline: HuggingFace MMS (facebook/mms-tts-ara)
   - Online: Microsoft Edge TTS with multiple Arabic voices
