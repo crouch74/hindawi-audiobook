@@ -72,17 +72,18 @@ class AudiobookBuilder:
         with open(concat_list_path, 'w') as f_concat:
             for idx, chapter in enumerate(chapters):
                 file_path = chapter['file']
-                duration = self._get_duration_ms(file_path)
+                # Convert to absolute path to avoid any path resolution issues
+                abs_file_path = os.path.abspath(file_path)
+                duration = self._get_duration_ms(abs_file_path)
                 
-                # Write to concat list
+                # Write to concat list with absolute path
                 # escape filename
-                safe_path = file_path.replace("'", "'\\''")
+                safe_path = abs_file_path.replace("'", "'\\\\''")
                 f_concat.write(f"file '{safe_path}'\n")
                 
                 # Update Metadata
                 # Chapter entry
                 # End is start + duration
-                # Then we add silence
                 
                 chapter_end = current_start + duration
                 
@@ -99,7 +100,8 @@ class AudiobookBuilder:
                 
                 # Add silence between chapters (except last)
                 if idx < len(chapters) - 1:
-                    f_concat.write(f"file '{silence_path}'\n")
+                    abs_silence_path = os.path.abspath(silence_path)
+                    f_concat.write(f"file '{abs_silence_path}'\n")
                     current_start += silence_duration
 
         with open(ffmetadata_path, 'w', encoding='utf-8') as f_meta:

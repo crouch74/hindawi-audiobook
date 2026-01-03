@@ -47,39 +47,53 @@ def main():
     else:
         cover_path = None
 
-    # 3. TTS Selection
+    # 3. Mode Selection
     from rich.prompt import Prompt
     
-    log_info("🔊  Select TTS Provider:")
-    print("  1. HuggingFace MMS (Offline, Standard Quality)")
-    print("  2. Edge TTS (Online, High Quality, Multiple Voices)")
+    log_info("🛠️  Select Generation Mode:")
+    print("  1. Audio Only")
+    print("  2. Appendix (PDF) Only")
+    print("  3. Both (Audio + Appendix)")
     
-    choice = Prompt.ask("Choose provider", choices=["1", "2"], default="1")
-    
-    if choice == "1":
-        provider = "mms"
-        voice = "facebook/mms-tts-ara"
-    else:
-        provider = "edge"
-        log_info("🗣️  Select Voice:")
-        print("  1. Salma (Egypt - Female)")
-        print("  2. Shakir (Egypt - Male)")
-        print("  3. Hamed (Saudi Arabia - Male)")
-        print("  4. Zariyah (Saudi Arabia - Female)")
-        
-        voice_map = {
-            "1": "ar-EG-SalmaNeural",
-            "2": "ar-EG-ShakirNeural",
-            "3": "ar-SA-HamedNeural",
-            "4": "ar-SA-ZariyahNeural"
-        }
-        v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
-        voice = voice_map[v_choice]
+    mode = Prompt.ask("Choose mode", choices=["1", "2", "3"], default="3")
+    generate_audio = mode in ["1", "3"]
+    generate_pdf = mode in ["2", "3"]
 
-    log_info(f"🤖  Initializing TTS Engine ({provider} - {voice})...")
-    tts = TTSEngine(provider=provider, voice=voice)
+    # 4. TTS Selection (Only if audio)
+    if generate_audio:
+        log_info("🔊  Select TTS Provider:")
+        print("  1. HuggingFace MMS (Offline, Standard Quality)")
+        print("  2. Edge TTS (Online, High Quality, Multiple Voices)")
+        
+        choice = Prompt.ask("Choose provider", choices=["1", "2"], default="1")
+        
+        if choice == "1":
+            provider = "mms"
+            voice = "facebook/mms-tts-ara"
+        else:
+            provider = "edge"
+            log_info("🗣️  Select Voice:")
+            print("  1. Salma (Egypt - Female)")
+            print("  2. Shakir (Egypt - Male)")
+            print("  3. Hamed (Saudi Arabia - Male)")
+            print("  4. Zariyah (Saudi Arabia - Female)")
+            
+            voice_map = {
+                "1": "ar-EG-SalmaNeural",
+                "2": "ar-EG-ShakirNeural",
+                "3": "ar-SA-HamedNeural",
+                "4": "ar-SA-ZariyahNeural"
+            }
+            v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
+            voice = voice_map[v_choice]
+
+        log_info(f"🤖  Initializing TTS Engine ({provider} - {voice})...")
+        tts = TTSEngine(provider=provider, voice=voice)
+    else:
+        tts = None
     
     chapter_files = []
+    appendices_data = []
     
     with Progress(
         SpinnerColumn(),
@@ -101,66 +115,88 @@ def main():
             
             progress.update(task_id, description=f"[cyan]Processing: {chapter['title']}")
             
-            # Check if audio exists
-            if os.path.exists(wav_path):
-                # We can verify it, but for now just skip
-                pass
-            else:
-                progress.console.print(f"Downloading text for: {chapter['title']}")
-                text = scraper.get_chapter_text(chapter['url'])
-                if not text:
-                    log_warning(f"⚠️  Empty text for chapter: {chapter['title']}")
-                    progress.advance(task_id)
-                    continue
+            # Use cached extraction if we skip TTS? Ideally re-scrape to get images if PDF requested
+            # But scraper doesn't cache scrape results to disk yet.
+            # We must scrape.
+            
+            progress.console.print(f"Fetching content for: {chapter['title']}")
+            content_data = scraper.get_chapter_content(chapter['url'])
+            text = content_data['text']
+            
+            # Store appendix info
+            appendices_data.append({
+                'chapter_title': chapter['title'],
+                'data': content_data['appendix']
+            })
 
-                # Stats
-                num_paras = text.count('\n') + 1 # Basic paragraph count
-                num_words = len(text.split())
-                chunks = tts.chunk_text(text)
-                
-                log_info(f"  📊 Stats: {len(chunks)} chunks (sentences), {num_paras} paragraphs, {num_words} words")
-                
-                # Chunk Progress
-                chunk_task = progress.add_task(f"[magenta]  Synthesizing...", total=len(chunks))
-                
-                segments = []
-                silence = tts.get_silence()
-                
-                for chunk in chunks:
-                    if not chunk.strip():
-                        progress.advance(chunk_task)
+            # Check if audio exists
+            if generate_audio:
+                if os.path.exists(wav_path):
+                    # Skip TTS
+                    pass
+                else:
+                    if not text:
+                        log_warning(f"⚠️  Empty text for chapter: {chapter['title']}")
+                        progress.advance(task_id)
                         continue
+
+                    # Stats
+                    num_paras = text.count('\n') + 1 
+                    num_words = len(text.split())
+                    chunks = tts.chunk_text(text)
                     
-                    try:
-                        wav = tts.synthesize_text(chunk)
-                        segments.append(wav)
-                        segments.append(silence)
-                    except Exception as e:
-                        log_error(f"Error synthesising chunk: {e}")
+                    log_info(f"  📊 Stats: {len(chunks)} chunks, {num_paras} paras, {num_words} words")
                     
-                    progress.advance(chunk_task)
-                
-                progress.remove_task(chunk_task)
-                tts.save_to_file(segments, wav_path)
-                
-            if os.path.exists(wav_path):
-                chapter_files.append({
-                    'title': chapter['title'],
-                    'file': wav_path
-                })
+                    # Chunk Progress
+                    chunk_task = progress.add_task(f"[magenta]  Synthesizing...", total=len(chunks))
+                    
+                    segments = []
+                    silence = tts.get_silence()
+                    
+                    for chunk in chunks:
+                        if not chunk.strip():
+                            progress.advance(chunk_task)
+                            continue
+                        
+                        try:
+                            wav = tts.synthesize_text(chunk)
+                            segments.append(wav)
+                            segments.append(silence)
+                        except Exception as e:
+                            log_error(f"Error synthesising chunk: {e}")
+                        
+                        progress.advance(chunk_task)
+                    
+                    progress.remove_task(chunk_task)
+                    tts.save_to_file(segments, wav_path)
+                    
+                if os.path.exists(wav_path):
+                    chapter_files.append({
+                        'title': chapter['title'],
+                        'file': wav_path
+                    })
             
             progress.advance(task_id)
     
-    # 4. Build Audiobook
+    # 5. Build Artifacts
     safe_book_title = "".join(x for x in metadata['title'] if x.isalnum() or x in (' ', '_', '-')).strip()
-    m4b_filename = f"{safe_book_title}.m4b"
-    m4b_path = os.path.join(output_dir, m4b_filename)
     
-    log_info("📦  Building M4B Container...")
-    builder = AudiobookBuilder(cache_dir)
-    builder.build_m4b(chapter_files, metadata, cover_path, m4b_path)
-    
-    log_success(f"🎉  Audiobook saved to: {m4b_path}")
+    if generate_audio:
+        m4b_filename = f"{safe_book_title}.m4b"
+        m4b_path = os.path.join(output_dir, m4b_filename)
+        log_info("📦  Building M4B Container...")
+        builder = AudiobookBuilder(cache_dir)
+        builder.build_m4b(chapter_files, metadata, cover_path, m4b_path)
+        log_success(f"🎉  Audiobook saved to: {m4b_path}")
+        
+    if generate_pdf:
+        from .pdf_generator import PDFBuilder
+        pdf_filename = f"{safe_book_title}_Appendix.pdf"
+        pdf_path = os.path.join(output_dir, pdf_filename)
+        log_info("📄  Generating Appendix PDF...")
+        pdf_builder = PDFBuilder(output_dir)
+        pdf_builder.create_appendix(metadata, appendices_data, pdf_path)
+        log_success(f"🎉  Appendix saved to: {pdf_path}")
 
 if __name__ == '__main__':
     main()

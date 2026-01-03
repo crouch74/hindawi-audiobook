@@ -134,31 +134,112 @@ class Scraper:
             'chapters': chapters
         }
 
-    def get_chapter_text(self, chapter_url):
+    def get_chapter_content(self, chapter_url):
         """
-        Fetches the text content of a chapter.
+        Fetches chapter content, separating narrative text from appendix items (images, footnotes).
+        Returns dict: {'text': str, 'appendix': {'images': [], 'footnotes': []}}
         """
-        print(f"Fetching text from {chapter_url}")
+        print(f"Fetching content from {chapter_url}")
         response = self.session.get(chapter_url)
         if response.status_code == 404:
             print(f"Warning: Chapter {chapter_url} not found.")
-            return ""
+            return {'text': "", 'appendix': {'images': [], 'footnotes': []}}
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Extact text. Usually in a specific content div to avoid nav/footer.
-        # <div id="media_2" ...> or similar?
-        # Hindawi articles/books usually have a main content area.
-        # Often <div class="chapter_content"> or similar.
-        # Let's try getting paragraphs from the main container.
-        
-        # Strategies to find main text:
         content_div = soup.find(class_='chapterContent') or soup.find('div', id='content') or soup.find('div', class_='content') or soup.body
         
-        # remove scripts and styles
+        # Remove scripts, styles, and navigation
         for s in content_div(['script', 'style', 'header', 'footer', 'nav']):
             s.decompose()
+            
+        appendix = {'images': [], 'footnotes': []}
+        
+        # 1. Extract Images (Figures with captions)
+        for fig in content_div.find_all('figure'):
+            img = fig.find('img')
+            if img and img.get('src'):
+                src = img['src']
+                if not src.startswith('http'): 
+                    src = self.BASE_URL + src if src.startswith('/') else src
+                
+                # Get caption from figcaption
+                cap = fig.find('figcaption')
+                caption = cap.get_text(strip=True) if cap else ""
+                
+                # Get alt text and title
+                alt_text = img.get('alt', '')
+                title = img.get('title', '')
+                
+                # Combine caption sources
+                full_caption = caption or alt_text or title or ""
+                
+                appendix['images'].append({
+                    'src': src, 
+                    'caption': full_caption,
+                    'alt': alt_text,
+                    'title': title
+                })
+            fig.decompose()
+            
+        # Extract standalone images (not in figures)
+        for img in content_div.find_all('img'):
+             src = img.get('src')
+             if src:
+                 if not src.startswith('http'): 
+                     src = self.BASE_URL + src if src.startswith('/') else src
+                 
+                 alt_text = img.get('alt', '')
+                 title = img.get('title', '')
+                 
+                 # Look for caption in parent or sibling elements
+                 caption = ""
+                 parent = img.parent
+                 if parent and parent.name == 'div':
+                     # Check for caption class siblings
+                     caption_el = parent.find(class_='caption') or parent.find(class_='img-caption')
+                     if caption_el:
+                         caption = caption_el.get_text(strip=True)
+                 
+                 full_caption = caption or alt_text or title or ""
+                 
+                 appendix['images'].append({
+                     'src': src, 
+                     'caption': full_caption,
+                     'alt': alt_text,
+                     'title': title
+                 })
+             img.decompose()
+             
+        # 2. Extract Footnotes
+        # Method 1: Footnotes div with list
+        for fn_div in content_div.find_all(class_='footnotes'):
+            for li in fn_div.find_all('li'):
+                appendix['footnotes'].append(li.get_text(strip=True))
+            fn_div.decompose()
+        
+        # Method 2: Individual footnote divs
+        for fn in content_div.find_all(class_='footnote'):
+            text = fn.get_text(strip=True)
+            if text:
+                appendix['footnotes'].append(text)
+            fn.decompose()
+            
+        # Method 3: Aside elements (often used for footnotes)
+        for aside in content_div.find_all('aside'):
+            text = aside.get_text(strip=True)
+            if text and len(text) > 10:  # Avoid empty or very short asides
+                appendix['footnotes'].append(text)
+            aside.decompose()
+            
+        # Cleanup remaining markers/classes
+        for sup in content_div.find_all('sup'):
+            sup.decompose()
+            
+        for class_name in ['caption', 'img-container', 'marginal', 'img-caption']:
+             for el in content_div.find_all(class_=class_name):
+                 el.decompose()
 
         # Get all paragraphs
         paragraphs = content_div.find_all('p')
@@ -168,7 +249,10 @@ class Scraper:
             if text:
                 text_content.append(text)
         
-        return "\n\n".join(text_content)
+        return {
+            'text': "\n\n".join(text_content),
+            'appendix': appendix
+        }
 
     def download_cover(self, url, output_path):
         """
