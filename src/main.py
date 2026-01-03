@@ -84,18 +84,23 @@ def main():
         else:
             # Interactive mode
             from rich.prompt import Prompt
+            from .tts_engine import TTS_PROVIDERS
             
             log_info("🔊  Select TTS Provider:")
-            print("  1. HuggingFace MMS (Offline, Standard Quality)")
-            print("  2. Edge TTS (Online, High Quality, Multiple Voices)")
+            for key, info in TTS_PROVIDERS.items():
+                print(f"  {key}: {info['name']} [{info['type']}]")
+                print(f"     Quality: {info['quality']} | Speed: {info['speed']} | Size: {info['size']}")
             
-            choice = Prompt.ask("Choose provider", choices=["1", "2"], default="1")
+            choice = Prompt.ask("Choose provider", choices=list(TTS_PROVIDERS.keys()), default="edge")
+            provider = choice
             
-            if choice == "1":
-                provider = "mms"
+            if provider == "mms":
                 voice = "facebook/mms-tts-ara"
-            else:
-                provider = "edge"
+            elif provider == "gtts":
+                voice = "ar"
+            elif provider == "silero":
+                voice = "xglm_v1"
+            elif provider == "edge":
                 log_info("🗣️  Select Voice:")
                 print("  1. Salma (Egypt - Female)")
                 print("  2. Shakir (Egypt - Male)")

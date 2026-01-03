@@ -8,6 +8,38 @@ import io
 from pydub import AudioSegment
 from transformers import VitsModel, AutoTokenizer
 
+# TTS Provider Metadata
+TTS_PROVIDERS = {
+    'mms': {
+        'name': 'HuggingFace MMS',
+        'quality': '⭐⭐⭐ Good',
+        'speed': '🐢 Slow (CPU)',
+        'size': '~400MB',
+        'type': 'Offline'
+    },
+    'edge': {
+        'name': 'Microsoft Edge',
+        'quality': '⭐⭐⭐⭐⭐ Excellent',
+        'speed': '⚡ Very Fast',
+        'size': '0MB (Online)',
+        'type': 'Online'
+    },
+    'gtts': {
+        'name': 'Google TTS',
+        'quality': '⭐⭐⭐ Good',
+        'speed': '⚡ Fast',
+        'size': '0MB (Online)',
+        'type': 'Online'
+    },
+    'silero': {
+        'name': 'Silero TTS',
+        'quality': '⭐⭐⭐⭐ Very Good',
+        'speed': '🐢 Medium',
+        'size': '~100MB',
+        'type': 'Offline'
+    }
+}
+
 class TTSEngine:
     def __init__(self, provider="mms", voice="facebook/mms-tts-ara", device=None):
         self.provider = provider
@@ -22,14 +54,23 @@ class TTSEngine:
             self.sampling_rate = self.model.config.sampling_rate
         elif self.provider == "edge":
             print(f"Initialized Edge TTS with voice: {self.voice}")
-            # Edge rate is dynamic, but usually 24k/48k. We'll set it after first synth or assume 24k.
-            self.sampling_rate = 24000 
+            self.sampling_rate = 24000
+        elif self.provider == "gtts":
+            print(f"Initialized Google TTS")
+            self.sampling_rate = 24000
+        elif self.provider == "silero":
+            print(f"Initializing Silero TTS (model loads on first use)...")
+            self.sampling_rate = 48000 
     
     def synthesize_text(self, text):
         if self.provider == "mms":
             return self._synthesize_mms(text)
         elif self.provider == "edge":
             return self._synthesize_edge(text)
+        elif self.provider == "gtts":
+            return self._synthesize_gtts(text)
+        elif self.provider == "silero":
+            return self._synthesize_silero(text)
             
     def _synthesize_mms(self, text):
         inputs = self.tokenizer(text, return_tensors="pt")
@@ -74,6 +115,57 @@ class TTSEngine:
             if chunk["type"] == "audio":
                 data += chunk["data"]
         return data
+
+    def _synthesize_gtts(self, text):
+        """Synthesize using Google Text-to-Speech"""
+        from gtts import gTTS
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            tts = gTTS(text=text, lang='ar', slow=False)
+            tts.save(temp_path)
+            
+            # Convert MP3 to numpy array
+            audio = AudioSegment.from_mp3(temp_path)
+            self.sampling_rate = audio.frame_rate
+            
+            # Convert to mono if stereo
+            if audio.channels > 1:
+                audio = audio.set_channels(1)
+            
+            samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
+            samples = samples / 32768.0  # Normalize to [-1, 1]
+            
+            return samples
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def _synthesize_silero(self, text):
+        """Synthesize using Silero TTS"""
+        # Lazy load model on first use
+        if not hasattr(self, 'silero_model'):
+            print("  Downloading Silero model (first time only, ~100MB)...")
+            self.silero_model, _, self.silero_sample_rate, _ = torch.hub.load(
+                repo_or_dir='snakers4/silero-models',
+                model='silero_tts',
+                language='ar',
+                speaker='xglm_v1'
+            )
+            self.sampling_rate = self.silero_sample_rate
+            self.silero_model.to(self.device)
+        
+        # Generate audio
+        audio = self.silero_model.apply_tts(
+            text=text,
+            speaker='xglm_v1',
+            sample_rate=self.sampling_rate
+        )
+        
+        return audio.cpu().numpy()
 
     def chunk_text(self, text, max_chars=400):
         """
