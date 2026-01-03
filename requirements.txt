@@ -1,8 +1,10 @@
-requests==2.31.0
-beautifulsoup4==4.12.3
-torch==2.3.0
-transformers==4.41.0
-scipy==1.13.0
+requests==2.32.4
+beautifulsoup4==4.14.3
+torch==2.2.2
+transformers==4.46.3
+scipy==1.10.1
 pydub==0.25.1
-lxml==5.2.1
+lxml==6.0.2
 CairoSVG==2.7.1
+rich==14.2.0
+cloudscraper==1.2.71

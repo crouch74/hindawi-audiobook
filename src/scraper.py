@@ -1,5 +1,6 @@
 import os
 import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 import cairosvg
 
@@ -9,7 +10,15 @@ class Scraper:
     def __init__(self, book_id):
         self.book_id = book_id
         self.book_url = f"{self.BASE_URL}/books/{book_id}/"
-        self.session = requests.Session()
+        # Allow cloudscraper to handle browser emulation matching the container's OS (Linux)
+        self.session = cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'linux', 'desktop': True}
+        )
+        # Add only non-conflicting headers
+        self.session.headers.update({
+            'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+            'Referer': 'https://www.google.com/',
+        })
 
     def get_book_metadata(self):
         """
@@ -24,71 +33,99 @@ class Scraper:
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # Title and Author
-        # Usually in a header block. Structure might vary but typically H1/H2
-        # Based on Hindawi structure:
-        # <div class="book-header">
-        #   <h1>Title</h1>
-        #   <div class="author">Author</div>
-        # </div>
-        # We'll try to find them generically or specific classes if known.
-        # Looking at public hindawi pages:
-        # Title is often in <h1> inside user-content or similar, or just headers.
-        
-        # Let's try standard metadata tags or specific classes
-        title_tag = soup.find('h1') or soup.find('h2') # Fallback
-        title = title_tag.get_text(strip=True) if title_tag else "Unknown Title"
-
-        author_tag = soup.find('div', class_='author') or soup.find('a', class_='author')
-        author = author_tag.get_text(strip=True) if author_tag else "Unknown Author"
-
-        # Cover Image
-        # Often <div class="cover"><img src="..."></div>
-        cover_div = soup.find('div', class_='image')
-        cover_url = None
-        if cover_div:
-            img = cover_div.find('img')
-            if img and img.get('src'):
-                cover_url = img['src']
-                if not cover_url.startswith('http'):
-                    cover_url = self.BASE_URL + cover_url
-
-        # Chapters from TOC
-        # <div class="content"><ul><li><a href="...">...</a></li>...</ul></div>
-        # Need to find the TOC list.
-        chapters = []
-        toc_div = soup.find('div', id='toc') or soup.find('div', class_='index')
-        
-        # If specific ID/class fails, generic search for links with book_id
-        if toc_div:
-             links = toc_div.find_all('a')
+        # 1. Title
+        # Try OpenGraph title first
+        og_title = soup.find('meta', property='og:title')
+        if og_title and og_title.get('content'):
+            title = og_title['content']
         else:
-            # Fallback: look for all links containing the book ID in path, excluding the main page
-            # This is risky, let's try to assume there is a list.
-            # Hindawi structure usually has 'index' class for TOC
-            links = soup.select('div.content ul li a')
+            title_tag = soup.find('h1') or soup.find('h2')
+            title = title_tag.get_text(strip=True) if title_tag else "Unknown Title"
 
-        for link in links:
+        # 2. Author
+        # Try standard meta author or Hindawi specific
+        # Often in <div class="author"> or <a href="...">Names</a>
+        author_tag = soup.find('div', class_='author') or soup.find('a', class_='author')
+        if author_tag:
+             author = author_tag.get_text(strip=True)
+        else:
+             # Fallback
+             author = "Unknown Author"
+
+        # 3. Cover Image
+        # Try og:image
+        og_image = soup.find('meta', property='og:image')
+        cover_url = None
+        if og_image and og_image.get('content'):
+            cover_url = og_image['content']
+        else:
+            # Fallback
+            cover_div = soup.find('div', class_='image') or soup.find('div', class_='bookCover')
+            if cover_div:
+                img = cover_div.find('img')
+                if img and img.get('src'):
+                    cover_url = img['src']
+        
+        if cover_url and not cover_url.startswith('http'):
+            cover_url = self.BASE_URL + cover_url
+
+        # 4. Chapters
+        # Broad search for all links containing the book ID
+        chapters = []
+        seen_urls = set()
+        
+        # Start looking for links
+        # Filter all links
+        for link in soup.find_all('a'):
             href = link.get('href')
             if not href: continue
             
-            # Ensure it's a chapter link (usually ends with a number or fractional number)
-            # href might be relative
+            # Normalize URL
             full_url = href if href.startswith('http') else self.BASE_URL + href
-            
-            # Simple check: it must contain the book_id
-            if self.book_id not in full_url:
+            if not full_url.endswith('/'):
+                 full_url += '/'
+                 
+            # Must contain book_id
+            if str(self.book_id) not in full_url:
                 continue
-
-            # Exclude the main page itself if caught
-            if full_url.strip('/') == self.book_url.strip('/'):
+            
+            # Exclude the main page itself
+            # Main page:  .../books/ID/
+            # Chapters:   .../books/ID/X.Y/ or .../books/ID/chapter/
+            if full_url.rstrip('/') == self.book_url.rstrip('/'):
+                continue
+            
+            # Exclude known external or download patterns
+            if any(x in full_url for x in ['facebook.com', 'twitter.com', 'whatsapp://', 'linkedin.com', 'sharer', 'plus.google.com']):
+                continue
+            
+            if 'downloads.hindawi.org' in full_url:
                 continue
                 
+            # Exclude PDF/ePub/KFX links usually found in sidebars
+            if any(full_url.endswith(ext) for ext in ['.pdf', '.epub', '.kfx', '.mobi']):
+                continue
+
+            if full_url in seen_urls:
+                continue
+            seen_urls.add(full_url)
+            
             chapter_title = link.get_text(strip=True)
+            # Filter out numeric only titles if they are just pagination? 
+            # No, keep them.
+            
+            # If title is empty, maybe skip
+            if not chapter_title:
+                continue
+
             chapters.append({
                 'title': chapter_title,
                 'url': full_url
             })
+        
+        # Sort chapters by URL just in case, though they appear in order in DOM usually.
+        # But robust finding might mix order.
+        # Let's rely on DOM order which `find_all` preserves.
 
         return {
             'title': title,
@@ -117,7 +154,7 @@ class Scraper:
         # Let's try getting paragraphs from the main container.
         
         # Strategies to find main text:
-        content_div = soup.find('div', id='content') or soup.find('div', class_='content') or soup.body
+        content_div = soup.find(class_='chapterContent') or soup.find('div', id='content') or soup.find('div', class_='content') or soup.body
         
         # remove scripts and styles
         for s in content_div(['script', 'style', 'header', 'footer', 'nav']):
