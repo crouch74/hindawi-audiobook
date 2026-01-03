@@ -7,12 +7,27 @@ Convert public-domain Arabic books from Hindawi.org into fully chaptered M4B aud
 - 📚 **Scrape** book content from Hindawi.org
 - 🎵 **Smart Audio Detection**: Automatically downloads pre-recorded audio when available
 - 🎙️ **Multiple TTS Options**: 
-  - Offline: HuggingFace MMS (facebook/mms-tts-ara)
-  - Online: Microsoft Edge TTS with multiple Arabic voices
+  - **Online**: 
+    - **Microsoft Edge TTS**: Best quality, multiple voices, very fast (0MB)
+    - **Google TTS (gTTS)**: Reliable, standard quality, fast (0MB)
+  - **Offline**:
+    - **HuggingFace MMS**: Good quality, slow (CPU only), (~400MB)
+    - **Silero TTS**: Very good quality, natural sounding, medium speed (~100MB)
 - 🎧 **M4B Audiobooks** with chapters, metadata, and cover art
 - 📄 **PDF Appendices** containing images, captions, and footnotes
 - 🐳 **Docker Support** for easy deployment
 - 🎨 **Rich CLI** with progress bars and detailed logging
+
+## TTS Provider Comparison
+
+| Provider | Type | Quality | Speed | Download Size | Best For |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Edge TTS** | Online | ⭐⭐⭐⭐⭐ | ⚡ Fast | 0MB | High quality online |
+| **Google TTS** | Online | ⭐⭐⭐ | ⚡ Fast | 0MB | Lightweight online |
+| **Silero TTS** | Offline | ⭐⭐⭐⭐ | 🐢 Medium | ~100MB | High quality offline |
+| **HF MMS** | Offline | ⭐⭐⭐ | 🐢 Slow | ~400MB | Standard offline |
+
+---
 
 ## Installation
 
@@ -93,52 +108,37 @@ optional arguments:
   --cache-dir DIR       Directory for intermediate files (default: cache)
   --mode {audio,pdf,both}
                         Generation mode (default: interactive prompt)
-  --tts-provider {mms,edge}
+  --tts-provider {edge,gtts,silero,mms}
                         TTS provider (default: interactive prompt)
-  --voice VOICE         Voice for Edge TTS:
-                        - ar-EG-SalmaNeural (Egypt - Female)
-                        - ar-EG-ShakirNeural (Egypt - Male)
-                        - ar-SA-HamedNeural (Saudi Arabia - Male)
-                        - ar-SA-ZariyahNeural (Saudi Arabia - Female)
+  --voice VOICE         Voice for Edge TTS (default: ar-EG-SalmaNeural)
 ```
 
 ## Available Voices
 
-### Egyptian Arabic
-- **Salma** (Female): `ar-EG-SalmaNeural`
-- **Shakir** (Male): `ar-EG-ShakirNeural`
+### Microsoft Edge (Online)
+- **Egyptian**: `ar-EG-SalmaNeural` (F), `ar-EG-ShakirNeural` (M)
+- **Saudi**: `ar-SA-HamedNeural` (M), `ar-SA-ZariyahNeural` (F)
 
-### Saudi Arabic
-- **Hamed** (Male): `ar-SA-HamedNeural`
-- **Zariyah** (Female): `ar-SA-ZariyahNeural`
+### Other Providers
+- **Google TTS**: Automatic Arabic (`ar`)
+- **Silero**: High-quality Arabic speaker (`xglm_v1`)
+- **HF MMS**: Standard Arabic model
 
-## Output Files
+## Usage Examples
 
-- **M4B Audiobook**: `output/<book_title>.m4b`
-- **PDF Appendix**: `output/<book_title>_Appendix.pdf`
-- **Cache Files**: `cache/<book_id>/` (WAV files, metadata, cover)
-
-## Examples
-
-### Example 1: Quick PDF Generation
+### Example 1: High Quality Online (Edge)
 ```bash
-docker run --rm -v $(pwd)/output:/app/output -v $(pwd)/cache:/app/cache \
-  hindawi_audiobook 46319638 --mode pdf
+python -m src.main 46319638 --mode audio --tts-provider edge --voice ar-EG-SalmaNeural
 ```
 
-### Example 2: Full Audiobook with Egyptian Female Voice
+### Example 2: High Quality Offline (Silero)
 ```bash
-python -m src.main 46319638 \
-  --mode both \
-  --tts-provider edge \
-  --voice ar-EG-SalmaNeural
+python -m src.main 46319638 --mode audio --tts-provider silero
 ```
 
-### Example 3: Offline Audio Generation
+### Example 3: Quick PDF Only
 ```bash
-python -m src.main 46319638 \
-  --mode audio \
-  --tts-provider mms
+python -m src.main 46319638 --mode pdf
 ```
 
 ## Troubleshooting

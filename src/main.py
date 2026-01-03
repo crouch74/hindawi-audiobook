@@ -14,10 +14,10 @@ def main():
     parser.add_argument('--cache-dir', default='cache', help="Directory for intermediate files")
     parser.add_argument('--mode', choices=['audio', 'pdf', 'both'], default=None, 
                         help="Generation mode: audio, pdf, or both (interactive if not specified)")
-    parser.add_argument('--tts-provider', choices=['mms', 'edge'], default=None,
-                        help="TTS provider: mms or edge (interactive if not specified)")
+    parser.add_argument('--tts-provider', choices=['mms', 'edge', 'gtts', 'silero'], default=None,
+                        help="TTS provider: mms, edge, gtts, or silero (interactive if not specified)")
     parser.add_argument('--voice', default=None,
-                        help="Voice for Edge TTS: ar-EG-SalmaNeural, ar-EG-ShakirNeural, ar-SA-HamedNeural, ar-SA-ZariyahNeural")
+                        help="Voice for Edge TTS (e.g., ar-EG-SalmaNeural)")
     
     args = parser.parse_args()
     
