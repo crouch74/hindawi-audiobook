@@ -8,3 +8,4 @@ lxml==6.0.2
 CairoSVG==2.7.1
 rich==14.2.0
 cloudscraper==1.2.71
+edge-tts==7.2.7

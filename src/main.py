@@ -47,9 +47,37 @@ def main():
     else:
         cover_path = None
 
-    # 3. TTS Generation
-    log_info("🤖  Initializing TTS Engine... (this might take a moment)")
-    tts = TTSEngine() # Load model once
+    # 3. TTS Selection
+    from rich.prompt import Prompt
+    
+    log_info("🔊  Select TTS Provider:")
+    print("  1. HuggingFace MMS (Offline, Standard Quality)")
+    print("  2. Edge TTS (Online, High Quality, Multiple Voices)")
+    
+    choice = Prompt.ask("Choose provider", choices=["1", "2"], default="1")
+    
+    if choice == "1":
+        provider = "mms"
+        voice = "facebook/mms-tts-ara"
+    else:
+        provider = "edge"
+        log_info("🗣️  Select Voice:")
+        print("  1. Salma (Egypt - Female)")
+        print("  2. Shakir (Egypt - Male)")
+        print("  3. Hamed (Saudi Arabia - Male)")
+        print("  4. Zariyah (Saudi Arabia - Female)")
+        
+        voice_map = {
+            "1": "ar-EG-SalmaNeural",
+            "2": "ar-EG-ShakirNeural",
+            "3": "ar-SA-HamedNeural",
+            "4": "ar-SA-ZariyahNeural"
+        }
+        v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
+        voice = voice_map[v_choice]
+
+    log_info(f"🤖  Initializing TTS Engine ({provider} - {voice})...")
+    tts = TTSEngine(provider=provider, voice=voice)
     
     chapter_files = []
     
