@@ -55,12 +55,29 @@ docker build -t hindawi_audiobook .
 
 ## Usage
 
-### Local Usage (Interactive)
+### Quick Start
 
+Convert a Hindawi book by ID (Arabic only):
 ```bash
-# Interactive mode - prompts for all options
-python -m src.main 46319638
+python3 -m src.main 46319638
 ```
+
+Convert a local PDF or EPUB file (Arabic or English):
+```bash
+python3 -m src.main --file path/to/book.epub --lang en
+```
+
+### Options
+
+| Argument | Description |
+|----------|-------------|
+| `book_id` | Hindawi Book ID (e.g., 46319638) |
+| `--file`, `--pdf` | Path to a local PDF or EPUB file |
+| `--lang` | Language of the book (`ar` or `en`, default: `ar`) |
+| `--output-dir` | Where to save the final M4B |
+| `--mode` | `audio`, `pdf` (appendix), or `both` |
+| `--tts-provider`| `edge`, `mms`, `gtts`, or `silero` |
+| `--voice` | Specific TTS voice name |
 
 ### Local Usage (Non-Interactive)
 

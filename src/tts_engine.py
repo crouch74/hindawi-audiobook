@@ -41,11 +41,26 @@ TTS_PROVIDERS = {
 }
 
 class TTSEngine:
-    def __init__(self, provider="mms", voice="facebook/mms-tts-ara", device=None):
+    def __init__(self, provider="mms", voice=None, lang="ar", device=None):
         self.provider = provider
-        self.voice = voice # Model name or Edge voice name
+        self.lang = lang
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.sampling_rate = 16000 # Default fallback
+        
+        # Default voices based on language and provider
+        if not voice:
+            if provider == "mms":
+                voice = "facebook/mms-tts-ara" if lang == "ar" else "facebook/mms-tts-eng"
+            elif provider == "edge":
+                voice = "ar-EG-SalmaNeural" if lang == "ar" else "en-US-AndrewNeural"
+            elif provider == "gtts":
+                voice = "ar" if lang == "ar" else "en"
+            elif provider == "silero":
+                voice = "xglm_v1" # Silero Arabic
+                if lang != "ar":
+                    print(f"Warning: Silero is currently only configured for Arabic in this tool.")
+        
+        self.voice = voice
         
         if self.provider == "mms":
             print(f"Loading HF model {self.voice} on {self.device}...")
@@ -56,11 +71,11 @@ class TTSEngine:
             print(f"Initialized Edge TTS with voice: {self.voice}")
             self.sampling_rate = 24000
         elif self.provider == "gtts":
-            print(f"Initialized Google TTS")
+            print(f"Initialized Google TTS (lang: {self.lang})")
             self.sampling_rate = 24000
         elif self.provider == "silero":
             print(f"Initializing Silero TTS (model loads on first use)...")
-            self.sampling_rate = 48000 
+            self.sampling_rate = 48000
     
     def synthesize_text(self, text):
         if self.provider == "mms":
@@ -125,7 +140,7 @@ class TTSEngine:
             temp_path = f.name
         
         try:
-            tts = gTTS(text=text, lang='ar', slow=False)
+            tts = gTTS(text=text, lang=self.lang, slow=False)
             tts.save(temp_path)
             
             # Convert MP3 to numpy array

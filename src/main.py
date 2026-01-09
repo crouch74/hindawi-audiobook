@@ -8,8 +8,10 @@ from .audiobook_builder import AudiobookBuilder
 from .logger import console, log_info, log_success, log_error, log_warning
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert Hindawi books to M4B audiobook.")
-    parser.add_argument('book_id', help="The ID of the book on Hindawi.org (e.g., 46319638)")
+    parser = argparse.ArgumentParser(description="Convert Hindawi books or local PDFs to M4B audiobook.")
+    parser.add_argument('book_id', nargs='?', help="The ID of the book on Hindawi.org (e.g., 46319638)")
+    parser.add_argument('--file', '--pdf', dest='file', help="Path to a local PDF or EPUB file to convert")
+    parser.add_argument('--lang', choices=['ar', 'en'], default='ar', help="Language of the book (ar or en)")
     parser.add_argument('--output-dir', default='output', help="Directory to save the final M4B")
     parser.add_argument('--cache-dir', default='cache', help="Directory for intermediate files")
     parser.add_argument('--mode', choices=['audio', 'pdf', 'both'], default=None, 
@@ -17,39 +19,59 @@ def main():
     parser.add_argument('--tts-provider', choices=['mms', 'edge', 'gtts', 'silero'], default=None,
                         help="TTS provider: mms, edge, gtts, or silero (interactive if not specified)")
     parser.add_argument('--voice', default=None,
-                        help="Voice for Edge TTS (e.g., ar-EG-SalmaNeural)")
+                        help="Voice for TTS")
     
     args = parser.parse_args()
     
-    book_id = args.book_id
-    output_dir = args.output_dir
-    cache_dir = os.path.join(args.cache_dir, book_id)
-    
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(cache_dir, exist_ok=True)
-    
-    log_info(f"🚀  Starting Audiobook Generation for Book ID: {book_id}")
-    
-    # 1. Scrape Metadata
-    scraper = Scraper(book_id)
-    try:
-        with console.status("[bold green]Fetching metadata...", spinner="dots"):
-            metadata = scraper.get_book_metadata()
-    except Exception as e:
-        log_error(f"❌  Error fetching metadata: {e}")
+    if not args.book_id and not args.file:
+        parser.print_help()
         sys.exit(1)
+
+    output_dir = args.output_dir
+    lang = args.lang
+
+    if args.file:
+        from .document_extractor import DocumentExtractor
+        book_id = os.path.basename(args.file).rsplit('.', 1)[0]
+        cache_dir = os.path.join(args.cache_dir, book_id)
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(cache_dir, exist_ok=True)
         
+        log_info(f"🚀  Starting Audiobook Generation for File: {args.file}")
+        
+        extractor = DocumentExtractor(args.file)
+        metadata = extractor.get_metadata()
+        scraper = None
+    else:
+        book_id = args.book_id
+        cache_dir = os.path.join(args.cache_dir, book_id)
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        log_info(f"🚀  Starting Audiobook Generation for Book ID: {book_id}")
+        
+        # 1. Scrape Metadata
+        scraper = Scraper(book_id)
+        try:
+            with console.status("[bold green]Fetching metadata...", spinner="dots"):
+                metadata = scraper.get_book_metadata()
+        except Exception as e:
+            log_error(f"❌  Error fetching metadata: {e}")
+            sys.exit(1)
+            
     log_info(f"📖  Title: {metadata['title']}")
     log_info(f"✍️  Author: {metadata['author']}")
     log_info(f"📑  Found {len(metadata['chapters'])} chapters.")
     
-    # 2. Download Cover
+    # 2. Download Cover (only for scraped books)
     cover_path = os.path.join(cache_dir, "cover.png")
-    if metadata['cover_url']:
+    if not args.file and metadata['cover_url']:
         if not os.path.exists(cover_path):
             with console.status("[bold green]Downloading cover...", spinner="dots"):
                 scraper.download_cover(metadata['cover_url'], cover_path)
             log_success("🖼️  Cover downloaded")
+    elif args.file:
+        cover_path = None # Document extraction doesn't provide cover yet
     else:
         cover_path = None
 
@@ -77,47 +99,53 @@ def main():
         if args.tts_provider:
             # Non-interactive mode
             provider = args.tts_provider
-            if provider == "edge":
-                voice = args.voice or "ar-EG-SalmaNeural"  # Default to Salma
-            else:
-                voice = "facebook/mms-tts-ara"
+            voice = args.voice
         else:
             # Interactive mode
             from rich.prompt import Prompt
             from .tts_engine import TTS_PROVIDERS
             
-            log_info("🔊  Select TTS Provider:")
-            for key, info in TTS_PROVIDERS.items():
+            log_info(f"🔊  Select TTS Provider (Language: {lang}):")
+            available_providers = list(TTS_PROVIDERS.keys())
+            if lang != 'ar' and 'silero' in available_providers:
+                available_providers.remove('silero') # Remove Silero for non-Arabic for now
+                
+            for key in available_providers:
+                info = TTS_PROVIDERS[key]
                 print(f"  {key}: {info['name']} [{info['type']}]")
                 print(f"     Quality: {info['quality']} | Speed: {info['speed']} | Size: {info['size']}")
             
-            choice = Prompt.ask("Choose provider", choices=list(TTS_PROVIDERS.keys()), default="edge")
+            choice = Prompt.ask("Choose provider", choices=available_providers, default="edge")
             provider = choice
             
             if provider == "mms":
-                voice = "facebook/mms-tts-ara"
+                voice = "facebook/mms-tts-ara" if lang == "ar" else "facebook/mms-tts-eng"
             elif provider == "gtts":
-                voice = "ar"
+                voice = lang
             elif provider == "silero":
                 voice = "xglm_v1"
             elif provider == "edge":
-                log_info("🗣️  Select Voice:")
-                print("  1. Salma (Egypt - Female)")
-                print("  2. Shakir (Egypt - Male)")
-                print("  3. Hamed (Saudi Arabia - Male)")
-                print("  4. Zariyah (Saudi Arabia - Female)")
-                
-                voice_map = {
-                    "1": "ar-EG-SalmaNeural",
-                    "2": "ar-EG-ShakirNeural",
-                    "3": "ar-SA-HamedNeural",
-                    "4": "ar-SA-ZariyahNeural"
-                }
-                v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
-                voice = voice_map[v_choice]
+                if lang == "ar":
+                    log_info("🗣️  Select Arabic Voice:")
+                    print("  1. Salma (Egypt - Female)")
+                    print("  2. Shakir (Egypt - Male)")
+                    print("  3. Hamed (Saudi Arabia - Male)")
+                    print("  4. Zariyah (Saudi Arabia - Female)")
+                    voice_map = {"1": "ar-EG-SalmaNeural", "2": "ar-EG-ShakirNeural", "3": "ar-SA-HamedNeural", "4": "ar-SA-ZariyahNeural"}
+                    v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
+                    voice = voice_map[v_choice]
+                else:
+                    log_info("🗣️  Select English Voice:")
+                    print("  1. Andrew (US - Male)")
+                    print("  2. Ava (US - Female)")
+                    print("  3. Emma (UK - Female)")
+                    print("  4. Brian (UK - Male)")
+                    voice_map = {"1": "en-US-AndrewNeural", "2": "en-US-AvaNeural", "3": "en-GB-EmmaNeural", "4": "en-GB-BrianNeural"}
+                    v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
+                    voice = voice_map[v_choice]
 
         log_info(f"🤖  Initializing TTS Engine ({provider} - {voice})...")
-        tts = TTSEngine(provider=provider, voice=voice)
+        tts = TTSEngine(provider=provider, voice=voice, lang=lang)
     else:
         tts = None
     
@@ -149,7 +177,11 @@ def main():
             # We must scrape.
             
             progress.console.print(f"Fetching content for: {chapter['title']}")
-            content_data = scraper.get_chapter_content(chapter['url'])
+            if scraper:
+                content_data = scraper.get_chapter_content(chapter['url'])
+            else:
+                content_data = extractor.get_chapter_content(chapter)
+                
             text = content_data['text']
             audio_url = content_data.get('audio_url')
             
@@ -246,7 +278,7 @@ def main():
         builder.build_m4b(chapter_files, metadata, cover_path, m4b_path)
         log_success(f"🎉  Audiobook saved to: {m4b_path}")
         
-    if generate_pdf:
+    if generate_pdf and scraper:
         from .pdf_generator import PDFBuilder
         pdf_filename = f"{safe_book_title}_Appendix.pdf"
         pdf_path = os.path.join(output_dir, pdf_filename)
@@ -254,6 +286,9 @@ def main():
         pdf_builder = PDFBuilder(output_dir)
         pdf_builder.create_appendix(metadata, appendices_data, pdf_path)
         log_success(f"🎉  Appendix saved to: {pdf_path}")
+
+    if not scraper:
+        extractor.close()
 
 if __name__ == '__main__':
     main()

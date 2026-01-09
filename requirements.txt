@@ -13,3 +13,4 @@ weasyprint==61.2
 Markdown==3.7
 pydyf<0.11.0
 gTTS==2.5.4
+pymupdf==1.25.2
