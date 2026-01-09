@@ -8,42 +8,89 @@ from .audiobook_builder import AudiobookBuilder
 from .logger import console, log_info, log_success, log_error, log_warning
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert Hindawi books or local PDFs to M4B audiobook.")
+    parser = argparse.ArgumentParser(description="Convert Hindawi books or local PDFs/EPUBs to M4B audiobook.")
     parser.add_argument('book_id', nargs='?', help="The ID of the book on Hindawi.org (e.g., 46319638)")
     parser.add_argument('--file', '--pdf', dest='file', help="Path to a local PDF or EPUB file to convert")
-    parser.add_argument('--lang', choices=['ar', 'en'], default='ar', help="Language of the book (ar or en)")
+    parser.add_argument('--lang', choices=['ar', 'en'], default=None, help="Language of the book (ar or en)")
     parser.add_argument('--output-dir', default='output', help="Directory to save the final M4B")
     parser.add_argument('--cache-dir', default='cache', help="Directory for intermediate files")
     parser.add_argument('--mode', choices=['audio', 'pdf', 'both'], default=None, 
-                        help="Generation mode: audio, pdf, or both (interactive if not specified)")
+                        help="Generation mode: audio, pdf, or both")
     parser.add_argument('--tts-provider', choices=['mms', 'edge', 'gtts', 'silero'], default=None,
-                        help="TTS provider: mms, edge, gtts, or silero (interactive if not specified)")
+                        help="TTS provider: mms, edge, gtts, or silero")
     parser.add_argument('--voice', default=None,
                         help="Voice for TTS")
     
     args = parser.parse_args()
+    from rich.prompt import Prompt
+
+    # --- Full Interactive Setup ---
+    is_interactive = not args.book_id and not args.file
     
-    if not args.book_id and not args.file:
-        parser.print_help()
-        sys.exit(1)
+    source = None
+    book_id = args.book_id
+    file_path = args.file
+    lang = args.lang
+    mode = args.mode
+    provider = args.tts_provider
+    voice = args.voice
+
+    if is_interactive:
+        log_info("✨ Welcome to the Audiobook Generator Wizard!")
+        source = Prompt.ask("Select book source", choices=["Hindawi.org", "Local File"], default="Hindawi.org")
+        
+        if source == "Hindawi.org":
+            book_id = Prompt.ask("Enter Hindawi Book ID (e.g., 46319638)")
+            if not book_id:
+                log_error("❌ Book ID is required.")
+                sys.exit(1)
+        else:
+            file_path = Prompt.ask("Enter path to PDF or EPUB file")
+            if file_path:
+                # Clean path: strip quotes and expand ~
+                file_path = file_path.strip().strip('"').strip("'")
+                file_path = os.path.expanduser(file_path)
+                
+            if not file_path or not os.path.exists(file_path):
+                log_error(f"❌ File not found: {file_path}")
+                sys.exit(1)
+
+        if not lang:
+            lang = Prompt.ask("Select book language", choices=["ar", "en"], default="ar")
+            
+        if not mode:
+            log_info("🛠️  Select Generation Mode:")
+            print("  1. Audio Only")
+            print("  2. Appendix (PDF) Only")
+            print("  3. Both (Audio + Appendix)")
+            m_choice = Prompt.ask("Choose mode", choices=["1", "2", "3"], default="3")
+            mode = {'1': 'audio', '2': 'pdf', '3': 'both'}[m_choice]
+    else:
+        # Fallback defaults for missing args in semi-interactive mode
+        if not lang: lang = "ar"
+        if not mode: mode = "audio"
 
     output_dir = args.output_dir
-    lang = args.lang
 
-    if args.file:
+    # --- Processing logic starts here ---
+    if file_path:
         from .document_extractor import DocumentExtractor
-        book_id = os.path.basename(args.file).rsplit('.', 1)[0]
+        book_id = os.path.basename(file_path).rsplit('.', 1)[0]
         cache_dir = os.path.join(args.cache_dir, book_id)
         os.makedirs(output_dir, exist_ok=True)
         os.makedirs(cache_dir, exist_ok=True)
         
-        log_info(f"🚀  Starting Audiobook Generation for File: {args.file}")
+        log_info(f"🚀  Starting Audiobook Generation for File: {file_path}")
         
-        extractor = DocumentExtractor(args.file)
+        extractor = DocumentExtractor(file_path)
         metadata = extractor.get_metadata()
         scraper = None
     else:
-        book_id = args.book_id
+        # If still no book_id by now, it's an error
+        if not book_id:
+            parser.print_help()
+            sys.exit(1)
+            
         cache_dir = os.path.join(args.cache_dir, book_id)
         os.makedirs(output_dir, exist_ok=True)
         os.makedirs(cache_dir, exist_ok=True)
@@ -65,84 +112,66 @@ def main():
     
     # 2. Download Cover (only for scraped books)
     cover_path = os.path.join(cache_dir, "cover.png")
-    if not args.file and metadata['cover_url']:
+    if not file_path and metadata['cover_url']:
         if not os.path.exists(cover_path):
             with console.status("[bold green]Downloading cover...", spinner="dots"):
                 scraper.download_cover(metadata['cover_url'], cover_path)
             log_success("🖼️  Cover downloaded")
-    elif args.file:
-        cover_path = None # Document extraction doesn't provide cover yet
+    elif file_path:
+        cover_path = None
     else:
         cover_path = None
 
-    # 3. Mode Selection
-    if args.mode:
-        # Non-interactive mode (from command-line args)
-        mode_map = {'audio': '1', 'pdf': '2', 'both': '3'}
-        mode = mode_map[args.mode]
-    else:
-        # Interactive mode
-        from rich.prompt import Prompt
-        
-        log_info("🛠️  Select Generation Mode:")
-        print("  1. Audio Only")
-        print("  2. Appendix (PDF) Only")
-        print("  3. Both (Audio + Appendix)")
-        
-        mode = Prompt.ask("Choose mode", choices=["1", "2", "3"], default="3")
-    
-    generate_audio = mode in ["1", "3"]
-    generate_pdf = mode in ["2", "3"]
+    generate_audio = mode in ["audio", "both"]
+    generate_pdf = mode in ["pdf", "both"]
 
     # 4. TTS Selection (Only if audio)
     if generate_audio:
-        if args.tts_provider:
-            # Non-interactive mode
-            provider = args.tts_provider
-            voice = args.voice
+        if provider and (voice or provider != 'edge'):
+            # Already have provider (and voice if edge)
+            pass
         else:
-            # Interactive mode
-            from rich.prompt import Prompt
+            # Interactive or semi-interactive selection
             from .tts_engine import TTS_PROVIDERS
             
             log_info(f"🔊  Select TTS Provider (Language: {lang}):")
             available_providers = list(TTS_PROVIDERS.keys())
             if lang != 'ar' and 'silero' in available_providers:
-                available_providers.remove('silero') # Remove Silero for non-Arabic for now
+                available_providers.remove('silero')
                 
             for key in available_providers:
                 info = TTS_PROVIDERS[key]
                 print(f"  {key}: {info['name']} [{info['type']}]")
-                print(f"     Quality: {info['quality']} | Speed: {info['speed']} | Size: {info['size']}")
             
-            choice = Prompt.ask("Choose provider", choices=available_providers, default="edge")
-            provider = choice
+            if not provider:
+                provider = Prompt.ask("Choose provider", choices=available_providers, default="edge")
             
-            if provider == "mms":
-                voice = "facebook/mms-tts-ara" if lang == "ar" else "facebook/mms-tts-eng"
-            elif provider == "gtts":
-                voice = lang
-            elif provider == "silero":
-                voice = "xglm_v1"
-            elif provider == "edge":
-                if lang == "ar":
-                    log_info("🗣️  Select Arabic Voice:")
-                    print("  1. Salma (Egypt - Female)")
-                    print("  2. Shakir (Egypt - Male)")
-                    print("  3. Hamed (Saudi Arabia - Male)")
-                    print("  4. Zariyah (Saudi Arabia - Female)")
-                    voice_map = {"1": "ar-EG-SalmaNeural", "2": "ar-EG-ShakirNeural", "3": "ar-SA-HamedNeural", "4": "ar-SA-ZariyahNeural"}
-                    v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
-                    voice = voice_map[v_choice]
-                else:
-                    log_info("🗣️  Select English Voice:")
-                    print("  1. Andrew (US - Male)")
-                    print("  2. Ava (US - Female)")
-                    print("  3. Emma (UK - Female)")
-                    print("  4. Brian (UK - Male)")
-                    voice_map = {"1": "en-US-AndrewNeural", "2": "en-US-AvaNeural", "3": "en-GB-EmmaNeural", "4": "en-GB-BrianNeural"}
-                    v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
-                    voice = voice_map[v_choice]
+            if not voice:
+                if provider == "mms":
+                    voice = "facebook/mms-tts-ara" if lang == "ar" else "facebook/mms-tts-eng"
+                elif provider == "gtts":
+                    voice = lang
+                elif provider == "silero":
+                    voice = "xglm_v1"
+                elif provider == "edge":
+                    if lang == "ar":
+                        log_info("🗣️  Select Arabic Voice:")
+                        print("  1. Salma (Egypt - Female)")
+                        print("  2. Shakir (Egypt - Male)")
+                        print("  3. Hamed (Saudi Arabia - Male)")
+                        print("  4. Zariyah (Saudi Arabia - Female)")
+                        voice_map = {"1": "ar-EG-SalmaNeural", "2": "ar-EG-ShakirNeural", "3": "ar-SA-HamedNeural", "4": "ar-SA-ZariyahNeural"}
+                        v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
+                        voice = voice_map[v_choice]
+                    else:
+                        log_info("🗣️  Select English Voice:")
+                        print("  1. Andrew (US - Male)")
+                        print("  2. Ava (US - Female)")
+                        print("  3. Emma (UK - Female)")
+                        print("  4. Brian (UK - Male)")
+                        voice_map = {"1": "en-US-AndrewNeural", "2": "en-US-AvaNeural", "3": "en-GB-EmmaNeural", "4": "en-GB-BrianNeural"}
+                        v_choice = Prompt.ask("Choose voice", choices=["1", "2", "3", "4"], default="1")
+                        voice = voice_map[v_choice]
 
         log_info(f"🤖  Initializing TTS Engine ({provider} - {voice})...")
         tts = TTSEngine(provider=provider, voice=voice, lang=lang)
